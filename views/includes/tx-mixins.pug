@@ -40,9 +40,51 @@ mixin outputValueDisplay(tx, vout, voutIndex, nonZeroVoutValueCount)
 						i.bi-flag.text-warning.ms-2
 
 				else
-					span(title="This output has been spent (destroyed)." data-bs-toggle="tooltip")
-						i.bi-x-circle.text-danger.ms-2
+					if (txOutSpends && txOutSpends[voutIndex])
+						- var spentIconTxOutSpend = txOutSpends[voutIndex];
+						- var spentIconUrl = ((spentIconTxOutSpend.spendingBlockHeight != null) ? `./tx/${spentIconTxOutSpend.spendingtxid}@${spentIconTxOutSpend.spendingBlockHeight}` : `./tx/${spentIconTxOutSpend.spendingtxid}`) + `?spends=${tx.txid}:${voutIndex}`;
+						a(href=spentIconUrl, title="This output has been spent (destroyed). Click to view the spending transaction." data-bs-toggle="tooltip")
+							i.bi-x-circle.text-danger.ms-2
 
+					else
+						span(title="This output has been spent (destroyed)." data-bs-toggle="tooltip")
+							i.bi-x-circle.text-danger.ms-2
+
+
+
+mixin txOutSpendAnnotations(tx, txOutSpend, blockHeight)
+	if (!txOutSpend.blockhash)
+		span.badge.text-bg-warning.ms-2(title="The spending transaction is currently unconfirmed (in the mempool).", data-bs-toggle="tooltip") mempool
+
+	else if (txOutSpend.blockhash == tx.blockhash)
+		small.text-muted.ms-1
+			span.border-dotted(title="This output was spent in the same block that created it.", data-bs-toggle="tooltip") (spent immediately)
+
+	else if (blockHeight >= 0 && txOutSpend.spendingBlockHeight > blockHeight && !(tx.time && txOutSpend.spendingBlockTime > tx.time))
+		//- rare case: the spending block's timestamp is not later than the creation block's
+		//- (block times are only loosely ordered), so show the block distance instead of a duration
+		- var spentBlocksLater = txOutSpend.spendingBlockHeight - blockHeight;
+		small.text-muted.ms-1
+			span.border-dotted(title=`This output was spent ${spentBlocksLater} block${spentBlocksLater == 1 ? "" : "s"} after being created. The time span is unknown because the spending block's timestamp is not later than the creation block's timestamp.`, data-bs-toggle="tooltip") (spent #{spentBlocksLater} block#{spentBlocksLater == 1 ? "" : "s"} later)
+
+	else if (tx.time && txOutSpend.spendingBlockTime > tx.time)
+		- var txoLifeSeconds = txOutSpend.spendingBlockTime - tx.time;
+		- var txoLifeDuration = moment.duration(txoLifeSeconds * 1000);
+		small.text-muted.ms-1
+			span.border-dotted(title=`This output lived for ${utils.summarizeDuration(txoLifeDuration, {shortenDurationNames:false})} - from ${moment.utc(new Date(tx.time * 1000)).format('MMM D, Y')} until ${moment.utc(new Date(txOutSpend.spendingBlockTime * 1000)).format('MMM D, Y')} - before being spent.`, data-bs-toggle="tooltip") (lived #{utils.summarizeDuration(txoLifeDuration, {oneElement:true, shortenDurationNames:false})})
+
+		if (txoLifeSeconds / 60 / 60 / 24 / 365 > 5)
+			span.ms-1.d-none.d-sm-inline(title=`This UTXO was very old! It existed for ${parseInt(txoLifeSeconds / 60 / 60 / 24 / 365)}+ years before being spent (destroyed)!`, data-bs-toggle="tooltip")
+				+funItemIcon
+
+
+//- compact single-link form, used in the mobile (xs) rendering
+mixin txOutSpendDetails(tx, txOutSpend, spendingTxUrl, blockHeight)
+	span.text-muted.border-dotted.me-1(title="This output has been spent. The transaction linked here is the one that spent it.", data-bs-toggle="tooltip") spent by
+
+	a(href=spendingTxUrl) #{utils.ellipsizeMiddle(txOutSpend.spendingtxid, 14)}
+
+	+txOutSpendAnnotations(tx, txOutSpend, blockHeight)
 
 
 mixin txIoDetails(tx, txInputs, totalIOValues, blockHeight, options={})
@@ -68,7 +110,7 @@ mixin txIoDetails(tx, txInputs, totalIOValues, blockHeight, options={})
 							- var vout = {};
 
 					if (txVin.coinbase || vout || !global.txindexAvailable)
-						.clearfix
+						.clearfix(id=`input-${txVinIndex}`)
 							a.sz-xs-hidden.d-none.d-sm-inline.badge.fw-normal.card-highlight.border.text-decoration-none.me-2(data-bs-toggle="tooltip", title=`Input #${txVinIndex.toLocaleString()}`, style="white-space: nowrap;")
 								i.d-inline.bi-arrow-right.text-danger
 								
@@ -111,14 +153,18 @@ mixin txIoDetails(tx, txInputs, totalIOValues, blockHeight, options={})
 										
 									
 									span.mt-1
-										a.sz-xl-plus.d-none.d-xl-inline(href=`./tx/${txInput.txid}#output-${txVin.vout}`) #{utils.ellipsizeMiddle(txInput.txid, 22)}
+										a.sz-xl-plus.d-none.d-xl-inline(href=`./tx/${txInput.txid}#output-${txVin.vout}`, class=(highlightInputIndex == txVinIndex ? "text-info" : null)) #{utils.ellipsizeMiddle(txInput.txid, 22)}
 											span.text-muted  ##{txVin.vout}
 
-										a.sz-md-lg.d-none.d-md-inline.d-xl-none(href=`./tx/${txInput.txid}#output-${txVin.vout}`) #{utils.ellipsizeMiddle(txInput.txid, 14)}
+										a.sz-md-lg.d-none.d-md-inline.d-xl-none(href=`./tx/${txInput.txid}#output-${txVin.vout}`, class=(highlightInputIndex == txVinIndex ? "text-info" : null)) #{utils.ellipsizeMiddle(txInput.txid, 14)}
 											span.text-muted  ##{txVin.vout}
 
-										a.sz-xs-sm.small.d-inline.d-md-none(href=`./tx/${txInput.txid}#output-${txVin.vout}`) #{utils.ellipsizeMiddle(txInput.txid, 14)}
+										a.sz-xs-sm.small.d-inline.d-md-none(href=`./tx/${txInput.txid}#output-${txVin.vout}`, class=(highlightInputIndex == txVinIndex ? "text-info" : null)) #{utils.ellipsizeMiddle(txInput.txid, 14)}
 											span.text-muted  ##{txVin.vout}
+
+										if (highlightInputIndex == txVinIndex)
+											span(title="This input spends the output you clicked through from", data-bs-toggle="tooltip")
+												i.bi-arrow-left.text-warning.ms-1
 
 								if (vout && vout.scriptPubKey)
 									- var voutAddresses = utils.getVoutAddresses(vout);
@@ -294,6 +340,29 @@ mixin txIoDetails(tx, txInputs, totalIOValues, blockHeight, options={})
 						span.ms-2.float-end
 							+outputValueDisplay(tx, vout, voutIndex, nonZeroVoutValueCount)
 
+						//- symmetric with the inputs side: the spending tx link occupies the slot
+						//- where inputs show their previous outpoint (on mobile it renders below
+						//- the address instead, behind the details toggle)
+						if (txOutSpends && txOutSpends[voutIndex])
+							- var txOutSpend = txOutSpends[voutIndex];
+							//- the txid@height link form lets the spending tx page load even without txindex;
+							//- the "spends" param lets the target page highlight the input spending this output
+							- var spendingTxUrl = ((txOutSpend.spendingBlockHeight != null) ? `./tx/${txOutSpend.spendingtxid}@${txOutSpend.spendingBlockHeight}` : `./tx/${txOutSpend.spendingtxid}`) + `?spends=${tx.txid}:${voutIndex}`;
+
+							//- inline on lg+ so the link flows on the badge line, mirroring the inputs side
+							//- (on sm/md the address renders inline there instead, so use a separate line);
+							//- ellipsize counts are shorter than the input-side outpoint links to leave
+							//- room for the "(lived ...)" annotation without wrapping
+							span.word-wrap.d-none.d-sm-block.d-lg-inline
+								span.mt-1(title="This output has been spent. The transaction linked here is the one that spent it.", data-bs-toggle="tooltip")
+									a.sz-xl-plus.d-none.d-xl-inline(href=spendingTxUrl) #{utils.ellipsizeMiddle(txOutSpend.spendingtxid, 16)}
+
+									a.sz-md-lg.d-none.d-md-inline.d-xl-none(href=spendingTxUrl) #{utils.ellipsizeMiddle(txOutSpend.spendingtxid, 10)}
+
+									a.sz-xs-sm.small.d-inline.d-md-none(href=spendingTxUrl) #{utils.ellipsizeMiddle(txOutSpend.spendingtxid, 10)}
+
+								+txOutSpendAnnotations(tx, txOutSpend, blockHeight)
+
 						if (vout && vout.scriptPubKey.asm && !vout.scriptPubKey.asm.startsWith("OP_RETURN "))
 							if (voutAddresses.length == 0)
 								.my-2
@@ -329,7 +398,7 @@ mixin txIoDetails(tx, txInputs, totalIOValues, blockHeight, options={})
 
 						if (vout.scriptPubKey)
 							if (voutAddresses.length > 0)
-								
+
 
 							else if (false)
 								.mb-tiny
@@ -337,6 +406,16 @@ mixin txIoDetails(tx, txInputs, totalIOValues, blockHeight, options={})
 										+darkBadge(utils.outputTypeAbbreviation(vout.scriptPubKey.type))
 
 								+hexDataDisplay(vout.scriptPubKey.asm)
+
+						//- on mobile, only shown when the details toggle above the transaction is expanded
+						if (txOutSpends && txOutSpends[voutIndex])
+							- var mobileTxOutSpend = txOutSpends[voutIndex];
+							- var mobileSpendingTxUrl = ((mobileTxOutSpend.spendingBlockHeight != null) ? `./tx/${mobileTxOutSpend.spendingtxid}@${mobileTxOutSpend.spendingBlockHeight}` : `./tx/${mobileTxOutSpend.spendingtxid}`) + `?spends=${tx.txid}:${voutIndex}`;
+
+							.d-block.d-sm-none
+								div(class=`tx-out-spend-${tx.txid}`, style="display: none;")
+									.small.mt-1
+										+txOutSpendDetails(tx, mobileTxOutSpend, mobileSpendingTxUrl, blockHeight)
 
 
 					if (voutIndex < (tx.vout.length - 1) || nonZeroVoutValueCount > 1)

@@ -110,6 +110,14 @@ block content
 											i.bi-x.text-danger
 
 								li
+									span.me-2 txospenderindex
+									if (global.txospenderindexAvailable)
+										i.bi-check2.text-success
+									else
+										span.border-dotted(title="Without a 'transaction output spender index' (available in Bitcoin Core v31.0+ via txospenderindex=1), this explorer is unable to link spent transaction outputs to the transactions that spent them.", data-bs-toggle="tooltip")
+											i.bi-x.text-danger
+
+								li
 									span.me-2 coinstatsindex
 									if (getindexinfo && getindexinfo["coinstatsindex"])
 										i.bi-check2.text-success

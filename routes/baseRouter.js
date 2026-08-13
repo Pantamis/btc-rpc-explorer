@@ -1360,6 +1360,50 @@ router.get("/block-analysis", function(req, res, next) {
 	next();
 });
 
+// max time the transaction page's first render waits for txospenderindex lookups; cached
+// lookups resolve nearly instantly, but cold ones can be slow (one random blk-file read per
+// output) - beyond this limit the page renders without spending info and auto-reloads via
+// /internal-api/tx-out-spends-ready once the background lookup completes
+const txOutSpendsRenderWaitLimit = 2000;
+
+// uses the txospenderindex to find the spending transaction of each of tx's outputs,
+// setting res.locals.txOutSpends (map of vout index -> {txid, vout, spendingtxid[, blockhash]
+// [, spendingBlockHeight][, spendingBlockTime]}, spent outputs only) and
+// res.locals.result.gettxspendingprevout (the raw rpc result)
+async function loadTxOutSpends(tx, res) {
+	const spendingPrevouts = await coreApi.getTxSpendingPrevouts(tx);
+
+	// blockhash is absent when the spending tx is still in the mempool; copies keep
+	// the header-derived fields added below out of the cached rpc result
+	const txOutSpends = {};
+	spendingPrevouts.forEach(item => {
+		if (item.spendingtxid) {
+			txOutSpends[item.vout] = Object.assign({}, item);
+		}
+	});
+
+	// resolve each spending block hash to its (cached) header: the height makes the
+	// "spent by" links work without txindex (via /tx/:txid@:height) and the block time
+	// gives the lifespan of each spent output
+	const spendingBlockHashes = [...new Set(Object.values(txOutSpends).map(item => item.blockhash).filter(Boolean))];
+
+	const headersByHash = {};
+	await Promise.all(spendingBlockHashes.map(async (blockhash) => {
+		headersByHash[blockhash] = await coreApi.getBlockHeaderByHash(blockhash);
+	}));
+
+	Object.values(txOutSpends).forEach(item => {
+		const header = item.blockhash ? headersByHash[item.blockhash] : null;
+		if (header) {
+			item.spendingBlockHeight = header.height;
+			item.spendingBlockTime = header.time;
+		}
+	});
+
+	res.locals.txOutSpends = txOutSpends;
+	res.locals.result.gettxspendingprevout = spendingPrevouts;
+}
+
 router.get("/tx/:transactionId@:blockHeight", asyncHandler(async (req, res, next) => {
 	req.query.blockHeight = req.params.blockHeight;
 	req.url = "/tx/" + req.params.transactionId;
@@ -1413,6 +1457,11 @@ router.get("/tx/:transactionId", asyncHandler(async (req, res, next) => {
 		res.locals.tx = tx;
 		res.locals.isCoinbaseTx = tx.vin[0].coinbase;
 
+		if (req.query.spends) {
+			// arrived via a "spent by" link: highlight the input spending the outpoint we came from
+			const [spentTxid, spentVout] = req.query.spends.split(":");
+			res.locals.highlightInputIndex = tx.vin.findIndex(vin => (vin.txid == utils.asHash(spentTxid) && vin.vout == parseInt(spentVout)));
+		}
 
 		res.locals.result.getrawtransaction = tx;
 		res.locals.result.txInputs = rawTxResult.txInputsByTransaction[txid] || {};
@@ -1421,6 +1470,28 @@ router.get("/tx/:transactionId", asyncHandler(async (req, res, next) => {
 		promises.push(utils.timePromise("tx.getTxUtxos", async () => {
 			res.locals.utxos = await coreApi.getTxUtxos(tx);
 		}, perfResults));
+
+		if (global.txospenderindexAvailable) {
+			promises.push(utils.timePromise("tx.getTxSpendingPrevouts", async () => {
+				const spendsPromise = loadTxOutSpends(tx, res).then(() => "done").catch(err => {
+					utils.logError("38ryeasp0w", err, {txid:txid});
+
+					return "error";
+				});
+
+				const raceResult = await Promise.race([
+					spendsPromise,
+					new Promise(resolve => setTimeout(() => resolve("pending"), txOutSpendsRenderWaitLimit))
+				]);
+
+				if (raceResult == "pending") {
+					// render without spending info; the lookup continues in the background,
+					// landing in the cache, and the page auto-reloads when it's ready
+					res.locals.txOutSpendsPending = true;
+				}
+			}, perfResults));
+		}
+
 
 		if (tx.confirmations == null) {
 			promises.push(utils.timePromise("tx.getMempoolTxDetails", async () => {

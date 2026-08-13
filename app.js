@@ -667,6 +667,12 @@ async function assessTxindexAvailability() {
 
 		debugLog(`txindex check: getindexinfo=${JSON.stringify(global.getindexinfo)}`);
 
+		// while we're here, check for txospenderindex (v31.0+); it powers spent-by-txid lookups
+		// on the transaction page; only treat it as available once it's done syncing
+		global.txospenderindexAvailable = !!(global.getindexinfo.txospenderindex && global.getindexinfo.txospenderindex.synced);
+
+		debugLog(`txospenderindex check: ${global.txospenderindexAvailable ? "available!" : "unavailable"}`);
+
 		if (global.getindexinfo.txindex) {
 			// getindexinfo was available, and txindex is also available...easy street
 			
@@ -1006,6 +1012,7 @@ expressApp.continueStartup = function() {
 
 	// default values - after we connect via RPC, we update these
 	global.txindexAvailable = false;
+	global.txospenderindexAvailable = false;
 	global.prunedBlockchain = false;
 	global.pruneHeight = -1;
 

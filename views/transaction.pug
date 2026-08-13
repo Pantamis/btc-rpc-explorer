@@ -248,6 +248,8 @@ block content
 				+sectionTitleBlock
 					.clearfix
 						.float-start #{inputsOutputsSectionTitle}
+							if (txOutSpendsPending)
+								small.text-muted.fw-normal.ms-2(id="tx-out-spends-loading", title="Looking up the spending transaction of each output is taking a while. This page will refresh automatically when the data is ready.", data-bs-toggle="tooltip") (loading spending data…)
 						.float-end
 							- var hasInputAddresses = false;
 							- var txInputs = result.txInputs;
@@ -261,9 +263,10 @@ block content
 											if (voutAddresses.length > 0)
 												- hasInputAddresses = true;
 
-							if (hasInputAddresses)
+							- var hasTxOutSpends = (txOutSpends != null && Object.keys(txOutSpends).length > 0);
+							if (hasInputAddresses || hasTxOutSpends)
 								.d-inline.d-sm-none
-									a(href="javascript:void(0)", onclick=`$(this).find(".toggle-icon").toggleClass("bi-plus-square").toggleClass("bi-dash-square"); $(".tx-input-address-${tx.txid}").toggle();`)
+									a(href="javascript:void(0)", onclick=`$(this).find(".toggle-icon").toggleClass("bi-plus-square").toggleClass("bi-dash-square"); $(".tx-input-address-${tx.txid}, .tx-out-spend-${tx.txid}").toggle();`)
 										i.toggle-icon.bi-plus-square.text-muted.text-end
 
 				+contentSection
@@ -400,6 +403,9 @@ block content
 
 					- pillTabs.push("UTXOs");
 
+					if (result.gettxspendingprevout)
+						- pillTabs.push("Output Spends");
+
 					if (mempoolDetails)
 						- pillTabs.push("Mempool Details");
 
@@ -424,7 +430,14 @@ block content
 							+contentSection("UTXOs")
 								pre
 									code.text-json.json(data-lang="json") #{JSON.stringify(utxos, null, 4)}
-									
+
+
+						if (result.gettxspendingprevout)
+							+pageTab("Output Spends")
+								+contentSection("Output Spends")
+									pre
+										code.text-json.json(data-lang="json") #{JSON.stringify(result.gettxspendingprevout, null, 4)}
+
 
 						if (mempoolDetails)
 							+pageTab("Mempool Details")
@@ -456,3 +469,39 @@ block endOfBody
 				}
 			});
 		});
+
+	if (highlightInputIndex >= 0)
+		script.
+			$(document).ready(function() {
+				var highlightedInput = document.getElementById("input-#{highlightInputIndex}");
+				if (highlightedInput) {
+					highlightedInput.scrollIntoView({block: "center"});
+				}
+			});
+
+	if (txOutSpendsPending)
+		script.
+			$(document).ready(function() {
+				// this render happened before the txospenderindex lookups completed; wait for the
+				// (cache-filling) lookup to finish, then reload to display the spending data
+				var reloadedKey = "txOutSpendsReloaded-" + txid;
+				var spendsReadyUrl = "./internal-api/tx-out-spends-ready/" + txid + "#{tx.blockhash ? ('?blockhash=' + tx.blockhash) : ''}";
+
+				var recentlyReloaded = false;
+				try { recentlyReloaded = (Date.now() - parseInt(sessionStorage.getItem(reloadedKey) || 0)) < 30000; } catch (e) {}
+
+				$.get(spendsReadyUrl).done(function(result) {
+					if (result.ready && !recentlyReloaded) {
+						// guard against a reload loop if the reloaded page somehow renders
+						// without the cached data again
+						try { sessionStorage.setItem(reloadedKey, String(Date.now())); } catch (e) {}
+
+						location.reload();
+
+					} else {
+						$("#tx-out-spends-loading").hide();
+					}
+				}).fail(function() {
+					$("#tx-out-spends-loading").hide();
+				});
+			});

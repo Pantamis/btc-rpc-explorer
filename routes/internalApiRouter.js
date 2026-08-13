@@ -94,8 +94,38 @@ router.get("/difficulty-by-height/:blockHeights", asyncHandler(async (req, res, 
 	const blockHeights = req.params.blockHeights.split(",").map(x => parseInt(x));
 
 	let results = await coreApi.getDifficultyByBlockHeights(blockHeights);
-	
+
 	res.json(results);
+
+	next();
+}));
+
+// resolves once the txospenderindex lookups for the given transaction's outputs are done
+// (and cached); the transaction page uses this to auto-reload when its first render happened
+// before a slow lookup completed
+router.get("/tx-out-spends-ready/:txid", asyncHandler(async (req, res, next) => {
+	try {
+		if (!global.txospenderindexAvailable) {
+			res.json({ready:false});
+
+			next();
+
+			return;
+		}
+
+		const txid = utils.asHash(req.params.txid);
+		const blockhash = req.query.blockhash ? utils.asHash(req.query.blockhash) : undefined;
+
+		const tx = (await coreApi.getRawTransactions([txid], blockhash))[0];
+		await coreApi.getTxSpendingPrevouts(tx);
+
+		res.json({ready:true});
+
+	} catch (err) {
+		utils.logError("wjq3298rewy", err);
+
+		res.json({ready:false});
+	}
 
 	next();
 }));

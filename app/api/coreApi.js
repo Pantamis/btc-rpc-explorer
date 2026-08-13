@@ -944,6 +944,45 @@ async function getTxUtxos(tx) {
 	return Promise.all(promises);
 }
 
+// uses the txospenderindex (via gettxspendingprevout) to identify, for each of the given
+// transaction's outputs, the transaction that spent it (if any); a single RPC call covers
+// all outputs
+function getTxSpendingPrevouts(tx) {
+	const outpoints = tx.vout.map((vout, voutIndex) => ({txid:tx.txid, vout:voutIndex}));
+	const cacheKey = "txSpendingPrevouts-" + tx.txid;
+
+	return new Promise(function(resolve, reject) {
+		const rpcAndCache = function() {
+			rpcApi.getTxSpendingPrevouts(outpoints).then(function(result) {
+				// an outpoint spent by a confirmed tx is final, and the lookup for it is the
+				// expensive one (a disk read on the node), so those results are worth caching
+				// for a while; but "unspent" / "spent by a mempool tx" answers can change at
+				// any moment (e.g. a tx spending the outpoint entering the mempool), so
+				// results containing any of those are only cached briefly
+				const finalResult = result.every(item => (item.spendingtxid && item.blockhash));
+
+				miscCache.set(cacheKey, result, finalResult ? FIFTEEN_MIN : ONE_MIN);
+
+				resolve(result);
+
+			}).catch(reject);
+		};
+
+		miscCache.get(cacheKey).then(function(cacheResult) {
+			if (cacheResult != null) {
+				resolve(cacheResult);
+
+			} else {
+				rpcAndCache();
+			}
+		}).catch(function(err) {
+			utils.logError("bqd0273rrxx8", err, {cacheKey:cacheKey});
+
+			rpcAndCache();
+		});
+	});
+}
+
 function getUtxo(txid, outputIndex) {
 	return new Promise(function(resolve, reject) {
 		tryCacheThenRpcApi(miscCache, "utxo-" + txid + "-" + outputIndex, FIFTEEN_MIN, function() {
@@ -2254,6 +2293,7 @@ module.exports = {
 	getRawTransactionsWithInputs: getRawTransactionsWithInputs,
 	getRawTransactionsByHeights: getRawTransactionsByHeights,
 	getTxUtxos: getTxUtxos,
+	getTxSpendingPrevouts: getTxSpendingPrevouts,
 	getMempoolTxDetails: getMempoolTxDetails,
 	getUptimeSeconds: getUptimeSeconds,
 	getHelp: getHelp,

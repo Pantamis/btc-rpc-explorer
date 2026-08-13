@@ -59,6 +59,8 @@ In particular, with `pruning` enabled and/or `txindex` disabled, the following f
 * The address and amount of previous transaction outputs will not be shown, only the txid:vout.
 * The mining fee will only be available for unconfirmed transactions.
 
+Additionally, if you're running Bitcoin Core v31.0+ with the transaction output spender index enabled (`txospenderindex=1`), the transaction page will link each spent output to the transaction that spent it.
+
 
 ## Install / Run
 
